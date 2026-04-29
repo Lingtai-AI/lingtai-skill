@@ -1,56 +1,41 @@
-# lingtai-mailbox-skill
+# lingtai-skill
 
-A universal skill that teaches coding agents how to interact with [LingTai](https://lingtai.ai) agent networks through the filesystem-based mailbox protocol.
+The canonical skill describing how to interact with a [LingTai](https://lingtai.ai) agent network through the shared human mailbox.
 
-Works with any coding agent that can read files: **OpenCode**, **Codex CLI**, **Hermes**, **OpenClaw**, or any tool with file access.
+This is a single Markdown file at `skills/lingtai/SKILL.md` documenting the filesystem mailbox protocol — reading and sending mail, agent discovery, liveness checks, lifecycle management, signal files, and remote networks over SSH. The protocol is pure filesystem; no SDK, no API, no dependencies.
 
-> **Claude Code users:** Use the dedicated plugin instead — [`Lingtai-AI/claude-code-plugin`](https://github.com/Lingtai-AI/claude-code-plugin)
+## Who this is for
 
-## What it teaches
+Coding agents that can read and write files. The skill is consumed by:
 
-- Reading and sending mail through `.lingtai/human/mailbox/`
-- Agent discovery and liveness checks
-- Lifecycle management (sleep, suspend, CPR, refresh)
-- Signal files (prompt injection, soul inquiry)
-- The orchestrator routing convention
+- **[Lingtai-AI/claude-code-plugin](https://github.com/Lingtai-AI/claude-code-plugin)** — Claude Code plugin (auto-loads via `claude plugin add`)
+- **[Lingtai-AI/codex-plugin](https://github.com/Lingtai-AI/codex-plugin)** — OpenAI Codex CLI plugin
+- Any other coding agent with file access — clone and copy `skills/lingtai/SKILL.md` into your tool's skill directory
 
-## Install
+## Manual install
 
-### OpenCode
+For agents without a dedicated wrapper plugin:
 
 ```bash
-# Global
-git clone https://github.com/Lingtai-AI/lingtai-mailbox-skill.git ~/.config/opencode/skills/lingtai-mailbox-skill
-
-# Project-scoped
-git clone https://github.com/Lingtai-AI/lingtai-mailbox-skill.git .opencode/skills/lingtai-mailbox-skill
+git clone https://github.com/Lingtai-AI/lingtai-skill.git
+cp -r lingtai-skill/skills/lingtai <your-tool's-skill-dir>/
 ```
 
-### Codex CLI
+For example:
 
-Copy the skill content into your project's `AGENTS.md`:
+- OpenCode: `~/.config/opencode/skills/lingtai/`
+- A tool that reads `AGENTS.md`: `cat lingtai-skill/skills/lingtai/SKILL.md >> AGENTS.md`
 
-```bash
-# Append the full protocol reference
-cat path/to/lingtai-mailbox-skill/skills/lingtai-mailbox/SKILL.md >> AGENTS.md
-```
+## Why this lives in its own repo
 
-Or just add a pointer:
-
-```markdown
-<!-- In AGENTS.md -->
-This project has a LingTai agent network. Read .lingtai/.library/intrinsic/ for protocol docs.
-```
-
-### Any other tool
-
-The skill is a single markdown file at `skills/lingtai-mailbox/SKILL.md`. Read it, follow it. The protocol is pure filesystem — no SDK, no API, no dependencies.
+The skill describes a protocol, not a tool. Both the Claude Code plugin and the Codex CLI plugin consume the same SKILL.md verbatim — keeping it here means there is exactly one source of truth, and the host-specific plugin repos own only their host-specific glue (hooks, manifests, install scripts).
 
 ## Requirements
 
 - A running LingTai project (`.lingtai/` directory with agents)
 - File read/write access
 - Python 3 (for UUID generation and liveness checks)
+- SSH keys configured for remote networks (`ssh-copy-id user@host`)
 
 ## License
 
