@@ -1,7 +1,7 @@
 ---
 name: lingtai
 description: Interact with LingTai agents through the shared human mailbox — locally or on remote machines via SSH. Read and send mail, discover agents, check liveness, manage agent lifecycle (sleep/suspend/cpr/refresh), monitor remote networks, and set up adaptive mail polling. Use this when the user asks about their agents, wants to check mail, or manage the agent network.
-version: 0.4.0
+version: 0.4.1
 ---
 
 # LingTai — Agent Network Integration
@@ -42,7 +42,7 @@ Use whatever file-search tool you have (glob, find, ls). Each `message.json` con
 | `subject` | string | Subject line |
 | `message` | string | Body text |
 | `received_at` | string | RFC3339 timestamp |
-| `in_reply_to` | string | (optional) UUID of the message being replied to |
+| `in_reply_to` | string | (optional) UUID of the message being replied to. **Unreliable** — many agents omit it even when replying. Correlate replies by `from` + `subject` ("Re: …") + arrival time, not by this field. |
 | `identity` | object | Sender's manifest snapshot |
 
 Sort by `received_at` (RFC3339 strings sort lexicographically). Present a summary to the user: sender, subject, time, and first line of the message.
@@ -132,17 +132,27 @@ A sent message goes through two observable states:
 
 - **Queued** — file exists at `human/mailbox/outbox/<uuid>/`.
 - **Delivered** — the UUID folder has moved to `human/mailbox/sent/<uuid>/`. This happens when the recipient's poller claims it.
-- **Replied** — a new message appears in `human/mailbox/inbox/`, typically with `in_reply_to` pointing at your UUID.
+- **Replied** — a new message appears in `human/mailbox/inbox/`. The reply *may* set `in_reply_to` to your UUID, but **many agents do not** — the audit-and-reply pattern shipped by current kernels does not always thread `in_reply_to`. Do not rely on it.
 
-To watch for both, poll every ~5 seconds with whatever monitoring or loop facility your host provides. The check is:
+**The reliable correlation is timestamp-based**: any inbox message whose folder mtime is newer than the moment you sent your outbox file is a candidate reply. Combine with sender (`from == <recipient>`) and subject (`Re: <your-subject>`) to confirm.
+
+Recommended pattern (touch a sentinel file at send time, then watch for movement on both fronts):
 
 ```bash
-ls .lingtai/human/mailbox/sent/<uuid> 2>/dev/null && \
-  find .lingtai/human/mailbox/inbox -name message.json \
-       -newer .lingtai/human/mailbox/outbox/<uuid>/message.json 2>/dev/null | head -1
+# At send time, immediately after writing the outbox JSON:
+SENT_AT_FILE=.lingtai/human/.send-marker-<uuid>
+touch "$SENT_AT_FILE"
+
+# Poll loop (every ~5 seconds, whichever facility your host provides):
+ls .lingtai/human/mailbox/sent/<uuid> 2>/dev/null && echo DELIVERED
+find .lingtai/human/mailbox/inbox -name message.json -newer "$SENT_AT_FILE" 2>/dev/null
 ```
 
-Once the `sent/<uuid>/` folder appears, the message is delivered; once a newer file appears in `inbox/`, a reply has arrived. Read it and report to the user, then stop polling.
+The sentinel file's mtime is fixed at send time and never moves, so `-newer` stays meaningful after the orchestrator claims the outbox folder (which would otherwise break `-newer outbox/<uuid>/message.json`).
+
+Once `sent/<uuid>/` exists, the message is delivered; once a `find` line appears, read each candidate and check `from` / `subject` to identify the reply. After presenting to the user, delete the sentinel file and stop polling.
+
+**Finding the reply when `in_reply_to` is missing**: read each candidate `message.json` and match on `(from == recipient_address) AND (subject startswith "Re: " OR matches your subject)`. If still ambiguous, ask the user. Never assume "newest inbox file = reply to my last send" without checking sender — agents may emit unrelated mail (status updates, broadcasts) that race with your reply.
 
 If the outbox folder still exists after ~10 seconds with no `sent/<uuid>/` counterpart, the orchestrator hasn't picked it up — it's likely not running. Check its heartbeat and offer CPR.
 
