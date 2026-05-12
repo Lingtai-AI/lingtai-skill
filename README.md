@@ -2,7 +2,7 @@
 
 The canonical skill describing how to interact with a [LingTai](https://lingtai.ai) agent network through the shared human mailbox.
 
-This is a single Markdown file at `skills/lingtai/SKILL.md` documenting the filesystem mailbox protocol — reading and sending mail, agent discovery, liveness checks, lifecycle management, signal files, and remote networks over SSH. The protocol is pure filesystem; no SDK, no API, no dependencies.
+This is a single Markdown file at `skills/lingtai/SKILL.md` documenting the filesystem mailbox protocol — reading and sending mail, agent discovery, liveness checks, lifecycle management, and signal files. The protocol is pure filesystem; no SDK, no API, no dependencies.
 
 ## Who this is for
 
@@ -35,7 +35,6 @@ The skill describes a protocol, not a tool. Both the Claude Code plugin and the 
 - A running LingTai project (`.lingtai/` directory with agents)
 - File read/write access
 - Python 3 (for UUID generation and liveness checks)
-- SSH keys configured for remote networks (`ssh-copy-id user@host`)
 
 ## License
 
