@@ -38,4 +38,4 @@ The skill describes a protocol, not a tool. Both the Claude Code plugin and the 
 
 ## License
 
-MIT
+Apache-2.0
