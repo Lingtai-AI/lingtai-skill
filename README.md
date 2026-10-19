@@ -2,7 +2,13 @@
 
 The canonical skill describing how to interact with a [LingTai](https://lingtai.ai) agent network through the shared human mailbox.
 
-This is a single Markdown file at `skills/lingtai/SKILL.md` documenting the filesystem mailbox protocol — reading and sending mail, agent discovery, liveness checks, lifecycle management, and signal files. The protocol is pure filesystem; no SDK, no API, no dependencies.
+This is a single Markdown file at `skills/lingtai/SKILL.md`. Since v0.5.0 it no longer carries the protocol itself: a LingTai network describes itself, and the skill tells a coding agent where to read that description and which host-side rules to follow.
+
+- **`.lingtai/human/README.md`** is written by the LingTai kernel from a versioned template. It is the authoritative protocol for acting as the human: reading and sending mail, liveness, signals, restarts.
+- **`.lingtai/<agent>/SKILL.md`** is written by each agent about itself: who it is, what it is working on, what to send it.
+- The skill adds the host rules (attribution, read tracking, polling, verification) and a minimal fallback recipe for projects whose kernel does not write the entrance yet.
+
+The protocol is pure filesystem; no SDK, no API, no dependencies.
 
 ## Who this is for
 
@@ -28,7 +34,7 @@ For example:
 
 ## Why this lives in its own repo
 
-The skill describes a protocol, not a tool. Both the Claude Code plugin and the Codex CLI plugin consume the same SKILL.md verbatim — keeping it here means there is exactly one source of truth, and the host-specific plugin repos own only their host-specific glue (hooks, manifests, install scripts).
+Both the Claude Code plugin and the Codex CLI plugin consume the same SKILL.md verbatim, so there is exactly one copy to edit; the host-specific plugin repos own only their glue (hooks, manifests). The protocol itself is owned by the kernel, so the skill cannot drift from it again (v0.4.x did: after the kernel's 2026-09 switch to absolute return addresses, agents could not reply to mail sent with its template).
 
 ## Requirements
 

@@ -1,306 +1,138 @@
 ---
 name: lingtai
-description: Interact with LingTai agents through the shared human mailbox. Read and send mail, discover agents, check liveness, manage agent lifecycle (sleep/suspend/cpr/refresh), and set up adaptive mail polling. Use this when the user asks about their agents, wants to check mail, or manage the agent network.
-version: 0.4.2
+description: Talk to a LingTai agent network from a coding agent by acting as the human through the shared mailbox in `.lingtai/`. Use when the user asks about their LingTai agents, wants to check or send LingTai mail, check whether agents are alive, or sleep, suspend, refresh, clear or CPR an agent.
+version: 0.5.0
 ---
 
-# LingTai — Agent Network Integration
+# LingTai
 
-You are connected to a LingTai agent network. You share the human's identity and mailbox. This skill teaches you how to interact with the network using your native file tools.
+You act as the **human** of a LingTai network. You share the human's directory `.lingtai/human/` and its mailbox. You
+have no agent identity of your own; you are another device the human uses to reach their agents.
 
-**This skill is opt-in.** Only activate when the user explicitly asks to interact with the LingTai network (send mail, check inbox, manage agents). Do not proactively read or summarize mail unless asked.
+**Opt-in.** Only act when the user asks you to do something with the network. Do not read, summarize or poll mail on
+your own initiative.
 
-## Trust but verify
+This skill does not describe the protocol. The network describes itself, and those files win over anything you
+remember or anything written here.
 
-Agents report their own progress, and their reports can drift from reality — avatars may report success without writing files, multi-copy scaffolding can leave a stale tree untouched, orchestrators may forward a plan-of-action as if already executed. When an agent claims "done" on work with real stakes (files created, translations completed, exports validated), spot-check at least one load-bearing claim with `ls`/`grep`/`find` before relaying the status to the user. A 5-second check catches false positives that would otherwise ship.
+## 1. Read the entrance before acting
 
-This is not about distrust — it's about the gap between "task dispatched" and "file on disk." The tighter the loop, the more the network learns. When you catch a false-positive, report it back to the agent with the evidence so it can fix both the artifact and its verification habit.
+1. Find the project: the nearest directory, from the working directory upward, that contains `.lingtai/`.
+2. Read **`.lingtai/human/README.md`**. The LingTai kernel writes it from a versioned template, and it is the
+   authoritative protocol: how to read and send mail, check liveness, send signals, and restart agents. Follow it
+   exactly. If it is missing, use the fallback in section 3.
+3. Discover agents: `.lingtai/*/.agent.json`. The **orchestrator** is the agent whose `admin` is an object with at least
+   one truthy value. `admin: null` marks a pseudo-agent such as the human.
+4. Read each relevant agent's own entrance, **`.lingtai/<agent>/SKILL.md`**, if present. Read the orchestrator's first.
+   The agent writes this file itself: who it is, what it is doing, and what to send it. Do not edit another agent's
+   `SKILL.md` or `README.md`.
 
-## Your Identity
+Re-read the entrance each session rather than relying on memory; kernels upgrade underneath you.
 
-You are the human. Your directory is `.lingtai/human/`. Your mailbox is `.lingtai/human/mailbox/`. You do not have a separate agent identity — you are another interface the human uses to interact with their agents, like checking email from a different device.
+## 2. Rules for the host (always apply)
 
-The human is a **pseudo-agent**: `admin: null`, no running process, no heartbeat. Real agents pick up your outgoing mail by polling your outbox (see "Sending Mail" below).
+- **Attribution.** Every message you send carries `"via": "<host>"` in its `identity` block: `claude-code` for Claude
+  Code, `codex` for Codex CLI, or a short stable name for any other tool.
+- **Read tracking.** After showing mail to the user, write the newest `received_at` you showed to
+  `.lingtai/human/.last_read_<host>` (`.last_read_cc` for Claude Code, `.last_read_codex` for Codex). Next time, show
+  only newer mail. Different hosts keep separate pointers.
+- **Address the orchestrator.** Send to the orchestrator, which delegates to other agents, unless the user names
+  another agent.
+- **Write in the user's language.** Show agents' replies as they are; translate only when asked.
+- **Waiting for a reply.** After sending, watch for delivery and the reply with whatever background facility your host
+  has: a Monitor or a background shell loop in Claude Code, or a short polling loop in Codex. Poll every few seconds
+  while the user waits; stop as soon as the reply has been shown. For background awareness during other work, check
+  every few minutes, and only if the user asked for it.
+- **Trust but verify.** Agents can report work as done that never reached disk. Before relaying a "done" on real work
+  (files written, exports, translations), check one load-bearing claim with `ls`, `find` or `grep`. If the claim is
+  false, tell the user and mail the agent the evidence.
+- **Heartbeat is not progress.** An agent can be alive while its LLM calls fail (context overflow, rate limits,
+  provider errors). If it goes quiet, read `.lingtai/<agent>/logs/agent.log` and `.lingtai/<agent>/.notification/`
+  before sending more mail.
+- **Do not touch kernel-owned files**: `.agent.json`, `.agent.heartbeat`, `.agent.lock`, `.status.json`, `README.md`,
+  `system/`, `.library/intrinsic/`, `history/`, `logs/`, `.alarm`, and another agent's `mailbox/`.
 
-When you send mail, add a `"via": "<your-host>"` field to the identity block so messages can be attributed to which interface sent them (e.g. `"via": "claude-code"`, `"via": "codex"`, etc.). Use a short stable identifier for the tool you are running inside.
+Deeper documentation: every agent carries the kernel's manuals at
+`.lingtai/<agent>/.library/intrinsic/capabilities/<skill>/SKILL.md` (for example `lingtai-kernel-anatomy`, `email`,
+`system-manual`), and the TUI installs guides at `~/.lingtai-tui/utilities/<skill>/SKILL.md` (for example
+`lingtai-tutorial-guide`, `lingtai-portal-guide`, `lingtai-tui-anatomy`). Read the relevant one before answering
+questions about how LingTai works.
 
-## Reading Mail
+## 3. Fallback: no `.lingtai/human/README.md`
 
-Scan for messages at this path:
+Older kernels do not write the entrance. Use this minimal recipe, which matches kernels from 2026-09 onward, and tell
+the user that upgrading LingTai (`lingtai-tui self-update`) makes the network describe itself.
 
-```
-.lingtai/human/mailbox/inbox/*/message.json
-```
+**Read mail.** Messages are `.lingtai/human/mailbox/inbox/<id>/message.json`; filed mail is under `archive/`. The id is
+the folder name, also in `_mailbox_id`. `from` is the sender's absolute directory; show its basename. Sort by
+`received_at`. Kernel replies do not set `in_reply_to`; match a reply by sender, a `Re: <subject>` subject, and arrival
+after your send.
 
-Use whatever file-search tool you have (glob, find, ls). Each `message.json` contains:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | UUID |
-| `from` | string | Sender address (e.g. "orchestrator") |
-| `to` | string or array | Recipient address(es) |
-| `subject` | string | Subject line |
-| `message` | string | Body text |
-| `received_at` | string | RFC3339 timestamp |
-| `in_reply_to` | string | (optional) UUID of the message being replied to. **Unreliable** — many agents omit it even when replying. Correlate replies by `from` + `subject` ("Re: …") + arrival time, not by this field. |
-| `identity` | object | Sender's manifest snapshot |
-
-Sort by `received_at` (RFC3339 strings sort lexicographically). Present a summary to the user: sender, subject, time, and first line of the message.
-
-Sent mail is at `.lingtai/human/mailbox/sent/*/message.json`.
-
-### Inbox summary snippet
-
-Use this to quickly list recent messages:
-
-```python
-import json, glob
-msgs = []
-for p in glob.glob('.lingtai/human/mailbox/inbox/*/message.json'):
-    with open(p) as f:
-        msgs.append(json.load(f))
-msgs.sort(key=lambda x: x.get('received_at', ''))
-for m in msgs[-10:]:
-    to = m.get('to', '?')
-    if isinstance(to, list): to = ','.join(to)
-    print(f"{m['received_at'][:19]}  {m['from']:<15s}  {m['subject'][:60]}")
-```
-
-### Read tracking
-
-After presenting messages to the user, record the most recent `received_at` timestamp to a host-suffixed state file so different interfaces don't share read pointers:
+**Send mail.** One recipient per message. Write a single file and nothing else:
 
 ```bash
-echo "<latest-received_at>" > .lingtai/human/.last_read_<host>
+cd <project>
+ID=$(python3 -c "import secrets,datetime;print(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(2))")
+mkdir -p .lingtai/human/mailbox/outbox/$ID
+touch .lingtai/human/.send-marker-$ID     # fixed send time, for reply detection
 ```
 
-Pick a short stable suffix for `<host>` matching the `via:` tag you use when sending mail (e.g. `.last_read_cc` for Claude Code, `.last_read_codex` for Codex CLI). On subsequent reads, only show messages with `received_at` newer than the stored timestamp. This prevents re-summarizing old messages across context compressions and new sessions.
-
-## Sending Mail
-
-**Always send messages to the orchestrator agent.** The orchestrator manages the network and delegates tasks to worker agents on your behalf. Never send mail directly to non-orchestrator agents unless the user explicitly asks. See "Agent Discovery" below for how to identify the orchestrator.
-
-### How delivery works
-
-The human is a pseudo-agent, so you do NOT write to the recipient's inbox directly. Instead:
-
-1. You write ONE file to your own outbox: `.lingtai/human/mailbox/outbox/<uuid>/message.json`.
-2. Every real agent polls `.lingtai/human/mailbox/outbox/` (they subscribe to `../human` by default). When the orchestrator sees a message addressed to itself, it claims it by atomically renaming `human/mailbox/outbox/<uuid>/` → `human/mailbox/sent/<uuid>/` and writes a copy into its own inbox.
-3. The appearance of the UUID folder in `human/mailbox/sent/` is the proof-of-delivery signal. Until that rename happens, your message is still "queued".
-
-You never write to the recipient's inbox, and you never populate `human/mailbox/sent/` yourself — the orchestrator does that via the rename.
-
-### Steps
-
-1. Generate UUID and timestamp in one call:
-   ```bash
-   python3 -c "import uuid; from datetime import datetime, timezone; print(uuid.uuid4()); print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))"
-   ```
-2. Create the message JSON (see template below).
-3. Write it to `.lingtai/human/mailbox/outbox/<uuid>/message.json`. Create the UUID directory with `mkdir -p` first.
-4. Check the recipient's heartbeat. If the agent is dead, queueing the message still succeeds but nothing will pick it up — inform the user and offer to CPR the orchestrator.
-5. Set up delivery + reply monitoring (see "Delivery and Reply Monitoring" below).
-
-Message template:
+`.lingtai/human/mailbox/outbox/$ID/message.json`:
 
 ```json
 {
-  "id": "<uuid>",
-  "_mailbox_id": "<uuid>",
+  "id": "<ID>",
+  "_mailbox_id": "<ID>",
   "from": "human",
-  "to": ["<recipient-address>"],
+  "to": ["<agent address: the `address` in its .agent.json, i.e. its directory name, never a path>"],
   "cc": [],
   "subject": "<subject>",
   "message": "<body>",
   "type": "normal",
-  "in_reply_to": "<original-message-uuid-if-replying, or omit>",
-  "received_at": "<timestamp>",
+  "received_at": "<UTC RFC3339 timestamp>",
   "attachments": [],
-  "identity": {
-    "agent_name": "human",
-    "admin": null,
-    "via": "<your-host>"
-  }
+  "identity": {"agent_name": "human", "admin": null, "via": "<host>"},
+  "_return_route": {"address": "<absolute path of .lingtai/human>", "sender_agent_id": ""}
 }
 ```
 
-The `to` field is always a list of strings, even for a single recipient. The pickup poller matches its own address against any entry in that list.
+`_return_route` is required: without it the agent cannot reply. The addressed agent claims the message by moving its
+folder to `.lingtai/human/mailbox/sent/$ID`; that move is the proof of delivery. Never write into an agent's inbox or
+into `human/mailbox/sent/` yourself. If the folder is still in the outbox after about 10 s, the agent is not running.
 
-### Delivery and Reply Monitoring
-
-A sent message goes through two observable states:
-
-- **Queued** — file exists at `human/mailbox/outbox/<uuid>/`.
-- **Delivered** — the UUID folder has moved to `human/mailbox/sent/<uuid>/`. This happens when the recipient's poller claims it.
-- **Replied** — a new message appears in `human/mailbox/inbox/`. The reply *may* set `in_reply_to` to your UUID, but **many agents do not** — the audit-and-reply pattern shipped by current kernels does not always thread `in_reply_to`. Do not rely on it.
-
-**The reliable correlation is timestamp-based**: any inbox message whose folder mtime is newer than the moment you sent your outbox file is a candidate reply. Combine with sender (`from == <recipient>`) and subject (`Re: <your-subject>`) to confirm.
-
-Recommended pattern (touch a sentinel file at send time, then watch for movement on both fronts):
+**Wait for the reply.**
 
 ```bash
-# At send time, immediately after writing the outbox JSON:
-SENT_AT_FILE=.lingtai/human/.send-marker-<uuid>
-touch "$SENT_AT_FILE"
-
-# Poll loop (every ~5 seconds, whichever facility your host provides):
-ls .lingtai/human/mailbox/sent/<uuid> 2>/dev/null && echo DELIVERED
-find .lingtai/human/mailbox/inbox -name message.json -newer "$SENT_AT_FILE" 2>/dev/null
+ls .lingtai/human/mailbox/sent/$ID >/dev/null 2>&1 && echo DELIVERED
+find .lingtai/human/mailbox/inbox -name message.json -newer .lingtai/human/.send-marker-$ID
 ```
 
-The sentinel file's mtime is fixed at send time and never moves, so `-newer` stays meaningful after the orchestrator claims the outbox folder (which would otherwise break `-newer outbox/<uuid>/message.json`).
+Check each new message's sender and subject; agents also send unrelated mail. Delete the marker once the reply is
+shown.
 
-Once `sent/<uuid>/` exists, the message is delivered; once a `find` line appears, read each candidate and check `from` / `subject` to identify the reply. After presenting to the user, delete the sentinel file and stop polling.
+**Liveness.** `.lingtai/<agent>/.agent.heartbeat` holds a Unix time as a float; the agent is alive if it is less than
+10 s old. Missing or stale means not running; ignore `state` in `.agent.json`, which goes stale when a process dies.
+The human is always treated as live.
 
-**Finding the reply when `in_reply_to` is missing**: read each candidate `message.json` and match on `(from == recipient_address) AND (subject startswith "Re: " OR matches your subject)`. If still ambiguous, ask the user. Never assume "newest inbox file = reply to my last send" without checking sender — agents may emit unrelated mail (status updates, broadcasts) that race with your reply.
+**Signals** (an empty file in the agent's directory unless noted; the agent must be running):
 
-If the outbox folder still exists after ~10 seconds with no `sent/<uuid>/` counterpart, the orchestrator hasn't picked it up — it's likely not running. Check its heartbeat and offer CPR.
+| File | Effect |
+|---|---|
+| `.sleep` | Sleep; new mail wakes it |
+| `.suspend` | Exit gracefully |
+| `.interrupt` | Cancel the current turn |
+| `.refresh` | Restart and reload `init.json` |
+| `.clear` (body `human`) | Wipe the conversation (forced molt); history is archived |
+| `.prompt` (body = text) | Inject the text as a `[system]` message |
 
-For background awareness during unrelated work (not waiting for a specific reply), use a longer-interval check (e.g. every few minutes) instead.
-
-## Agent Discovery
-
-Find all agents at this path:
-
-```
-.lingtai/*/.agent.json
-```
-
-Read each `.agent.json` to see: `agent_name`, `state`, `address`, `admin`, `capabilities`, `nickname`.
-
-The **orchestrator** is the agent whose `admin` field is a JSON object with at least one truthy boolean value (e.g. `{"karma": true}`). This is the primary agent the human interacts with.
-
-`admin: null` = human. `admin: {"karma": false, "nirvana": false}` = regular (non-orchestrator) agent.
-
-## Checking Agent Liveness
-
-Read `.lingtai/<agent>/.agent.heartbeat`. It contains a unix timestamp as a float (e.g. `1744567890.123456`).
-
-To check if alive:
+**CPR** (start an agent that is not running): resolve the interpreter's environment from `venv_path` in the agent's
+`init.json`, else `~/.lingtai-tui/runtime/venv`, then
 
 ```bash
-python3 -c "import time; t=float(open('.lingtai/<agent>/.agent.heartbeat').read().strip()); print('ALIVE' if time.time()-t < 3 else 'DEAD', f'({time.time()-t:.1f}s ago)')"
+<venv>/bin/lingtai-agent run .lingtai/<agent> >> .lingtai/<agent>/logs/agent.log 2>&1 &
 ```
 
-- Result < 3 seconds → agent is alive
-- Result >= 3 seconds → agent is dead (effectively SUSPENDED)
-- File missing → agent is dead
+Never delete `.agent.lock`; the kernel refuses to start a second copy on its own.
 
-Human is always alive (no heartbeat check needed).
-
-## Agent Lifecycle Management
-
-### Finding the Right Python
-
-Before launching agents, resolve the correct Python interpreter:
-
-1. Read the agent's `init.json` → look for `venv_path` field → use `<venv_path>/bin/python`
-2. If not found, try `~/.lingtai-tui/runtime/venv/bin/python`
-3. If not found, fall back to `python3` on PATH
-
-Verify it works: `<python> -c "import lingtai; print(lingtai.__version__)"`
-
-### Sleep
-
-Write an empty `.sleep` file to the agent's directory. The agent detects it on next heartbeat cycle and enters sleep mode.
-
-```bash
-touch .lingtai/<agent>/.sleep
-```
-
-To sleep all agents: iterate over all discovered agents (skip human), write `.sleep` to each alive one.
-
-### Suspend
-
-Write an empty `.suspend` file. The agent terminates gracefully.
-
-```bash
-touch .lingtai/<agent>/.suspend
-```
-
-To suspend all: same as sleep all, but write `.suspend` instead.
-
-### CPR (Resurrect)
-
-Launch the agent process in the background:
-
-```bash
-<python> -m lingtai run .lingtai/<agent>/ >> .lingtai/<agent>/logs/agent.log 2>&1 &
-```
-
-Only CPR agents that are not alive (heartbeat stale or missing).
-
-### Refresh (Restart)
-
-A full restart that reloads from init.json:
-
-1. Write `.suspend` to the agent directory
-2. Poll `.lingtai/<agent>/.agent.lock` every 500ms — wait for it to disappear (or timeout after 60s)
-3. If lock file persists after 60s, remove it manually (process likely died)
-4. Remove the `.suspend` file
-5. Launch the agent: `<python> -m lingtai run .lingtai/<agent>/ >> .lingtai/<agent>/logs/agent.log 2>&1 &`
-
-### Clear (Wipe History + Restart)
-
-Same as refresh, but also delete `history/chat_history.jsonl` before relaunching. The token ledger (`logs/token_ledger.jsonl`) is preserved.
-
-## Signals
-
-You can send signals to agents by writing files:
-
-| Signal | File | Content | Effect |
-|--------|------|---------|--------|
-| Sleep | `.sleep` | empty | Agent enters sleep mode |
-| Suspend | `.suspend` | empty | Agent terminates gracefully |
-| Prompt | `.prompt` | text | Injected as `[system]` message |
-| Inquiry | `.inquiry` | `<source>\n<question>` | Triggers soul introspection |
-
-For `.inquiry`, source is `"human"` or `"insight"`. Only one inquiry can be pending at a time — no-op if `.inquiry` or `.inquiry.taken` already exists.
-
-For `.prompt`, write the full text content you want the agent to receive as a system message.
-
-## Language
-
-Agents may respond in different languages depending on their LLM configuration. Present agent replies to the user as-is. If the user asks for a translation or communicates in a different language, translate accordingly. When sending mail, write in the language the user used in their request.
-
-## Opening the Portal (Viz)
-
-To show the network visualization:
-
-1. Read `.lingtai/.port` to get the portal's port number
-2. Open `http://localhost:<port>` in the browser
-
-If `.lingtai/.port` doesn't exist, the portal is not running. Inform the user they can start it with `lingtai-portal` in the project directory.
-
-## Reference Skills
-
-When you need deeper information about LingTai than this skill covers, read from the authoritative bundled-skills location. If you have access to a LingTai project, the LingTai TUI (`lingtai-tui`) is typically installed, which means `~/.lingtai-tui/bundled-skills/` exists and is populated.
-
-| Skill | Path | What it covers |
-|-------|------|---------------|
-| **Anatomy** | `~/.lingtai-tui/bundled-skills/lingtai-anatomy/SKILL.md` | Memory hierarchy, filesystem layout, runtime anatomy (turn loop, state machine, signal lifecycle, molt, mail atomicity). The most load-bearing reference. |
-| **Tutorial Guide** | `~/.lingtai-tui/bundled-skills/lingtai-tutorial-guide/SKILL.md` | How LingTai works — concepts, philosophy, lessons |
-| **Portal Guide** | `~/.lingtai-tui/bundled-skills/lingtai-portal-guide/SKILL.md` | Portal API endpoints, topology recording, replay |
-| **Recipe** | `~/.lingtai-tui/bundled-skills/lingtai-recipe/SKILL.md` | Behavioral recipes, network cloning, export/import |
-| **MCP** | `~/.lingtai-tui/bundled-skills/lingtai-mcp/SKILL.md` | MCP server configuration for agents |
-| **Changelog** | `~/.lingtai-tui/bundled-skills/lingtai-changelog/SKILL.md` | Breaking changes, renames, migrations |
-
-**Secondary fallback**: older projects may also have these symlinked into `.lingtai/.library/intrinsic/` inside the working directory. If the `~/.lingtai-tui/` location is missing (e.g. TUI not installed, user using a different frontend), try that path.
-
-If the user asks about LingTai or how anything works, read the relevant skill first before answering.
-
-## Common pitfalls
-
-### Multiple skill copies can drift
-
-A skill the user cares about may exist in more than one place:
-
-- `.lingtai/<agent>/.library/custom/<skill>/` — the agent's own working copy (typically the edit source)
-- `.lingtai/.library_shared/<skill>/` — shared with the whole network
-- `<project>/recipes/<id>/<skill>/` — packaged for external distribution
-
-When an agent edits only one copy, the others silently go stale. When auditing a skill's state, run `diff -rq` across all present copies before trusting any single one. Establish a single source of truth with the user and delete the drift copies — don't maintain parallel edits by hand.
-
-### Context-cap failure looks like a healthy agent
-
-An agent can heartbeat freshly and report state `active` while its LLM calls are silently failing (context overflow, rate limit, provider 5xx). Heartbeat ≠ progress. If an agent goes quiet after a large coordination session, read `logs/agent.log` for recent errors before concluding "it's thinking" — `Prompt exceeds max length`, 429 rate limits, and 5xx cascades are invisible from the outside. The fix is usually provider-swap, model-swap with bigger context, or history trim (clear/molt), not more messages.
+**Portal.** The port is in `.lingtai/.portal/port`; open `http://localhost:<port>`. If the file is missing, the user can
+start it with `lingtai-portal` in the project directory.
